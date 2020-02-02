@@ -36,6 +36,7 @@ def get_images_split(first_digits, second_digits):
     return image1, image2
 
 def get_images_no_split(dataset):
+    """Returns two images, but they won't be from the same class"""
     image1_batch = torch.zeros(BATCH_SIZE, 28, 28)
     image2_batch = torch.zeros(BATCH_SIZE, 28, 28)
     for idx in range(BATCH_SIZE):
@@ -76,7 +77,6 @@ class SeparationRunner():
         scorenet.load_state_dict(states[0])
         scorenet.eval()
 
-        # Grab the first two samples from MNIST
         trans = transforms.Compose([transforms.ToTensor()])
         dataset = MNIST(os.path.join(self.args.run, 'datasets', 'mnist'), train=False, download=True)
 
@@ -92,8 +92,8 @@ class SeparationRunner():
             # image1, image2 = get_images_split(first_digits, second_digits)
             image1, image2 = get_images_no_split(dataset)
 
-            # mixed = (image1 + image2).float()
-            mixed = torch.clamp(image1 + image2, 0, 1).float()
+            mixed = (image1 + image2).float()
+            # mixed = torch.clamp(image1 + image2, 0, 1).float()  # Capsule net
 
             mixed_grid = make_grid(mixed.detach(), nrow=GRID_SIZE, pad_value=1., padding=1)
             save_image(mixed_grid, "results/mixed_mnist.png")
@@ -147,7 +147,7 @@ class SeparationRunner():
                     # x = x + (-step_size * lambda_recon * recon_grads[0].detach()) + noise_x
                     # y = y + (-step_size * lambda_recon * recon_grads[1].detach()) + noise_y
 
-
+            # Clamp for writing purposes
             x = torch.clamp(x, 0, 1)
             y = torch.clamp(y, 0, 1)
 

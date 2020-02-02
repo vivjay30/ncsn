@@ -17,7 +17,7 @@ __all__ = ['MultipleMNISTRunner']
 
 BATCH_SIZE = 64
 GRID_SIZE = 8
-N = 6
+N = 6  # Number of digits
 SAVE_DIR = "results/output_dirs/mnist_multiple_{}".format(N)
 
 def psnr(est, gt):

@@ -31,7 +31,8 @@ MACHINE_IDX = [0, 1, 8, 9]
 
 
 def get_images_split(first_items, second_items):
-    """Returns two images, one from [0,4] and the other from [5,9]"""
+    """Returns two images, one from the datset first_items and the other from
+       second_items. Both should be numpy arryas in N x 3 x 32 x 32 shape"""
     rand_idx_1 = np.random.randint(0, first_items.shape[0] - 1, BATCH_SIZE)
     rand_idx_2 = np.random.randint(0, second_items.shape[0] - 1, BATCH_SIZE)
 
