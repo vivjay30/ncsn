@@ -130,6 +130,8 @@ class AnnealRunner():
 
         for epoch in range(self.config.training.n_epochs):
             for i, (X, y) in enumerate(dataloader):
+                import pdb
+                pdb.set_trace()
                 step += 1
                 score.train()
                 X = X.to(self.config.device)
@@ -216,6 +218,8 @@ class AnnealRunner():
                     # print("class: {}, step_size: {}, mean {}, max {}".format(c, step_size, grad.abs().mean(),
                     #                                                          grad.abs().max()))
 
+            import pdb
+            pdb.set_trace()
             return images
 
 
