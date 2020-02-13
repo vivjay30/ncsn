@@ -8,3 +8,5 @@ from runners.cifar_metric_runner import *
 from runners.denoise_runner import *
 from runners.baseline_runner import *
 from runners.multiple_mnist_runner import *
+from runners.multiple_cifar_runner import *
+from runners.manual_input_runner import *

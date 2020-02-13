@@ -148,7 +148,7 @@ class CIFARMetricRunner():
 
             #lambda_recon = 1.5
             for idx, sigma in enumerate(sigmas):
-                lambda_recon  = 2. / (sigma ** 2)
+                lambda_recon  = 1.0 / (sigma ** 2)
 
                 # Not completely sure what this part is for
                 labels = torch.ones(1, device=x.device) * idx

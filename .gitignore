@@ -9,6 +9,7 @@ logs/
 clear_and_run.sh
 graph_data
 *.png
+*/.*
 preprocessing/*.csv
 preprocessing/*.txt
 preprocessing/*.data

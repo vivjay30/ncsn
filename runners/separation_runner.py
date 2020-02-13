@@ -16,6 +16,7 @@ __all__ = ['SeparationRunner']
 
 BATCH_SIZE = 64
 GRID_SIZE = 8
+SAVE_DIR = "results/output_dirs/MNIST_class_split/"
 
 def psnr(est, gt):
     """Returns the P signal to noise ratio between the estimate and gt"""
@@ -70,6 +71,8 @@ class SeparationRunner():
         all_percentages = []  # All percentage accuracies
         dummy_metrics = []  # Metrics for the averaging value
 
+        bad_cases = {"gt1":[], "gt2":[], "mixed":[], "x":[], "y":[]}
+
         # Load the score network
         states = torch.load(os.path.join(self.args.log, 'checkpoint.pth'), map_location=self.config.device)
         scorenet = CondRefineNetDilated(self.config).to(self.config.device)
@@ -86,23 +89,26 @@ class SeparationRunner():
         first_digits = dataset.train_data[first_digits_idx]
         second_digits = dataset.train_data[second_digits_idx]
 
-
         for iteration in range(100):
             print("Iteration {}".format(iteration))
-            # image1, image2 = get_images_split(first_digits, second_digits)
-            image1, image2 = get_images_no_split(dataset)
+            curr_dir = os.path.join(SAVE_DIR, "{:07d}".format(iteration))
+            if not os.path.exists(curr_dir):
+                os.makedirs(curr_dir)
+
+            image1, image2 = get_images_split(first_digits, second_digits)
+            #image1, image2 = get_images_no_split(dataset)
 
             mixed = (image1 + image2).float()
             # mixed = torch.clamp(image1 + image2, 0, 1).float()  # Capsule net
 
-            mixed_grid = make_grid(mixed.detach(), nrow=GRID_SIZE, pad_value=1., padding=1)
-            save_image(mixed_grid, "results/mixed_mnist.png")
+            mixed_grid = make_grid(mixed.detach() / 2., nrow=GRID_SIZE, pad_value=1., padding=1)
+            save_image(mixed_grid, os.path.join(curr_dir, "mixed.png"))
 
             gt1_grid = make_grid(image1, nrow=GRID_SIZE, pad_value=1., padding=1)
-            save_image(gt1_grid, "results/image1gt_mnist.png")
+            save_image(gt1_grid, os.path.join(curr_dir, "gt1.png"))
 
             gt2_grid = make_grid(image2, nrow=GRID_SIZE, pad_value=1., padding=1)
-            save_image(gt2_grid, "results/image2gt_mnist.png")
+            save_image(gt2_grid, os.path.join(curr_dir, "gt2.png"))
 
             mixed = torch.Tensor(mixed).cuda().view(BATCH_SIZE, 1, 28, 28)
 
@@ -117,7 +123,7 @@ class SeparationRunner():
             n_steps_each = 100
 
             for idx, sigma in enumerate(sigmas):
-                lambda_recon = 0.1/(sigma**2)
+                lambda_recon = 1.8/(sigma**2)
                 # Not completely sure what this part is for
                 labels = torch.ones(1, device=x.device) * idx
                 labels = labels.long()
@@ -130,14 +136,14 @@ class SeparationRunner():
                     grad_x = scorenet(x.view(BATCH_SIZE, 1, 28, 28), labels).detach()
                     grad_y = scorenet(y.view(BATCH_SIZE, 1, 28, 28), labels).detach()
 
-                    #recon_loss = (torch.norm(torch.flatten(y+x-mixed)) ** 2)
+                    recon_loss = (torch.norm(torch.flatten(y+x-mixed)) ** 2)
                     #recon_loss = torch.norm(torch.flatten(torch.clamp(x + y, -10000000, 1) - mixed)) ** 2
 
-                    recon_loss = torch.norm(torch.flatten((1 / (1 + torch.exp(-5 * (y + x - 0.5))))  - mixed)) ** 2
+                    #recon_loss = torch.norm(torch.flatten((1 / (1 + torch.exp(-5 * (y + x - 0.5))))  - mixed)) ** 2
                     #recon_loss = torch.norm(torch.flatten((y - mixed)) ** 2
-                    print(recon_loss)
+                    # print(recon_loss)
+
                     recon_grads = torch.autograd.grad(recon_loss, [x,y])
-                    print(recon_grads[0].mean())
 
                     #x = x + (step_size * grad_x) + noise_x
                     #y = y + (step_size * grad_y) + noise_y
@@ -155,49 +161,81 @@ class SeparationRunner():
             y_to_write = torch.Tensor(y.detach().cpu())
 
             # PSNR Measure
-            # for idx in range(BATCH_SIZE):
-            #     est1 = psnr(x[idx], image1[idx].cuda()) + psnr(y[idx], image2[idx].cuda())
-            #     est2 = psnr(x[idx], image2[idx].cuda()) + psnr(y[idx], image1[idx].cuda())
-            #     correct_estimate = max(est1, est2) / 2.
-            #     all_psnr.append(correct_estimate)
+            for idx in range(BATCH_SIZE):
+                est1 = psnr(x[idx], image1[idx].cuda()) + psnr(y[idx], image2[idx].cuda())
+                est2 = psnr(x[idx], image2[idx].cuda()) + psnr(y[idx], image1[idx].cuda())
+                correct_estimate = max(est1, est2) / 2.
+                all_psnr.append(correct_estimate)
 
-            #     if est2 > est1:
-            #         x_to_write[idx] = y[idx]
-            #         y_to_write[idx] = x[idx]
+                if est2 > est1:
+                    x_to_write[idx] = y[idx]
+                    y_to_write[idx] = x[idx]
+
+                mixed_psnr = psnr(mixed[idx] / 2., image1[idx].cuda()) + psnr(mixed[idx] / 2., image2[idx].cuda())
+                dummy_metrics.append(mixed_psnr / 2.)
+
+                if correct_estimate < 12.:
+                    bad_cases["gt1"].append(image1[idx].detach().cpu().numpy())
+                    bad_cases["gt2"].append(image2[idx].detach().cpu().numpy())
+                    bad_cases["mixed"].append(mixed[idx].detach().cpu().numpy())
+                    bad_cases["x"].append(x_to_write[idx].detach().cpu().numpy())
+                    bad_cases["y"].append(y_to_write[idx].detach().cpu().numpy())
+                    print("Added bad case")
 
             # Percentage Measure
-            x_thresh = (x > 0.01)
-            y_thresh = (y > 0.01)
-            image1_thresh = (image1 > 0.01)
-            image2_thresh = (image2 > 0.01)
-            avg_thresh = ((mixed.detach()[idx] / 2.) > 0.01)
-            for idx in range(BATCH_SIZE):
-                est1 = np.count_nonzero((x_thresh[idx] == image1_thresh[idx].cuda()).detach().cpu()) + np.count_nonzero((y_thresh[idx] == image2_thresh[idx].cuda()).detach().cpu())
-                est2 = np.count_nonzero((x_thresh[idx] == image2_thresh[idx].cuda()).detach().cpu()) + np.count_nonzero((y_thresh[idx] == image1_thresh[idx].cuda()).detach().cpu())
-                correct_estimate = max(est1, est2)
-                percentage = correct_estimate / (2 * x.shape[-1] * x.shape[-2])
-                all_percentages.append(percentage)
+            # x_thresh = (x > 0.01)
+            # y_thresh = (y > 0.01)
+            # image1_thresh = (image1 > 0.01)
+            # image2_thresh = (image2 > 0.01)
+            # avg_thresh = ((mixed.detach()[idx] / 2.) > 0.01)
+            # for idx in range(BATCH_SIZE):
+            #     est1 = np.count_nonzero((x_thresh[idx] == image1_thresh[idx].cuda()).detach().cpu()) + np.count_nonzero((y_thresh[idx] == image2_thresh[idx].cuda()).detach().cpu())
+            #     est2 = np.count_nonzero((x_thresh[idx] == image2_thresh[idx].cuda()).detach().cpu()) + np.count_nonzero((y_thresh[idx] == image1_thresh[idx].cuda()).detach().cpu())
+            #     correct_estimate = max(est1, est2)
+            #     percentage = correct_estimate / (2 * x.shape[-1] * x.shape[-2])
+            #     all_percentages.append(percentage)
 
-                dummy_count = np.count_nonzero((avg_thresh == image1_thresh[idx].cuda()).detach().cpu()) + np.count_nonzero((avg_thresh == image2_thresh[idx].cuda()).detach().cpu())
-                dummy_percentage = dummy_count / (2 * x.shape[-1] * x.shape[-2])
-                dummy_metrics.append(dummy_percentage)
+            #     dummy_count = np.count_nonzero((avg_thresh == image1_thresh[idx].cuda()).detach().cpu()) + np.count_nonzero((avg_thresh == image2_thresh[idx].cuda()).detach().cpu())
+            #     dummy_percentage = dummy_count / (2 * x.shape[-1] * x.shape[-2])
+            #     dummy_metrics.append(dummy_percentage)
 
             # Recon Grid
             recon_grid = make_grid(torch.clamp(torch.clamp(x_to_write, 0, 1) + torch.clamp(y_to_write, 0, 1), 0, 1), nrow=GRID_SIZE, pad_value=1., padding=1)
-            save_image(recon_grid, "results/mnist_recon.png")
+            save_image(recon_grid, os.path.join(curr_dir, "recon.png"))
             # Write x and y
             x_grid = make_grid(x_to_write, nrow=GRID_SIZE, pad_value=1., padding=1)
-            save_image(x_grid, "results/x_mnist2.png")
+            save_image(x_grid, os.path.join(curr_dir, "x.png"))
 
             y_grid = make_grid(y_to_write, nrow=GRID_SIZE, pad_value=1., padding=1)
-            save_image(y_grid, "results/y_mnist2.png")
+            save_image(y_grid, os.path.join(curr_dir, "y.png"))
 
             # average_grid = make_grid(mixed.detach()/2., nrow=GRID_SIZE)
             # save_image(average_grid, "results/average_cifar.png")
 
-            #print("Curr mean {}".format(np.array(all_psnr).mean()))
-            print("Curr mean {}".format(np.array(all_percentages).mean()))
+            print("Curr mean {}".format(np.array(all_psnr).mean()))
+            #print("Curr mean {}".format(np.array(all_percentages).mean()))
             print("Curr dummy mean {}".format(np.array(dummy_metrics).mean()))
-            import pdb
-            pdb.set_trace()
+
+        y1 = np.stack(bad_cases["y"], axis=0)
+        y_grid = make_grid(torch.Tensor(y1), pad_value=1., padding=1)
+        save_image(y_grid, os.path.join(SAVE_DIR, "y_strange.png"))
+
+        x1 = np.stack(bad_cases["x"], axis=0)
+        x_grid = make_grid(torch.Tensor(x1), pad_value=1., padding=1)
+        save_image(x_grid, os.path.join(SAVE_DIR, "x_strange.png"))
+
+        gt1 = np.stack(bad_cases["gt1"], axis=0)
+        gt1_grid = make_grid(torch.Tensor(gt1), pad_value=1., padding=1)
+        save_image(gt1_grid, os.path.join(SAVE_DIR, "gt1_strange.png"))
+
+        gt2 = np.stack(bad_cases["gt2"], axis=0)
+        gt2_grid = make_grid(torch.Tensor(gt2), pad_value=1., padding=1)
+        save_image(gt2_grid, os.path.join(SAVE_DIR, "gt2_strange.png"))
+
+        mixed = np.stack(bad_cases["mixed"], axis=0) / 2.
+        mixed_grid = make_grid(torch.Tensor(mixed), pad_value=1., padding=1)
+        save_image(mixed_grid, os.path.join(SAVE_DIR, "mixed_strange.png"))
+
+        import pdb
+        pdb.set_trace()
 
